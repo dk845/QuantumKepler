@@ -1,0 +1,9 @@
+﻿venv/
+data/raw/
+data/processed/
+data/features/
+experiments/mlflow_runs/
+__pycache__/
+*.pyc
+.env
+.vscode/

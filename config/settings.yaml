@@ -1,0 +1,49 @@
+﻿project:
+  name: QuantumKepler
+  version: "1.0.0"
+
+paths:
+  raw_data: "data/raw"
+  processed_data: "data/processed"
+  features: "data/features"
+  models: "experiments/mlflow_runs"
+
+data:
+  kepler_stars: 1000
+  test_size: 0.2
+  random_state: 42
+  target_column: "label"
+  cadence: "long"
+
+features:
+  n_features: 20
+  normalize: true
+  handle_missing: "interpolate"
+
+classical:
+  random_forest:
+    n_estimators: 100
+    max_depth: 10
+    random_state: 42
+  cnn:
+    epochs: 50
+    batch_size: 32
+    learning_rate: 0.001
+
+quantum:
+  n_qubits: 4
+  n_layers: 2
+  backend: "default.qubit"
+  kernel: "rbf"
+  vqc:
+    steps: 100
+    learning_rate: 0.01
+    random_state: 42
+
+mlflow:
+  experiment_name: "quantumkepler"
+  tracking_uri: "experiments/mlflow_runs"
+
+streamlit:
+  title: "QuantumKepler"
+  page_icon: "planet"
