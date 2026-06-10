@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>QuantumKepler — NASA Dashboard</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#000; color:#fff; font-family:'Courier New',monospace; overflow:hidden; }
+canvas#three-canvas { display:block; position:fixed; top:0; left:0; }
+
+/* TOPBAR */
+#topbar {
+  position:fixed; top:0; left:0; right:0; z-index:10;
+  background:linear-gradient(180deg,rgba(0,15,35,0.97) 0%,transparent 100%);
+  padding:10px 20px; display:flex; justify-content:space-between; align-items:center;
+  border-bottom:1px solid rgba(0,200,255,0.2);
+}
+.logo { font-size:18px; font-weight:bold; color:#00C8FF; letter-spacing:4px; }
+.subtitle { font-size:9px; color:#556; letter-spacing:2px; margin-top:2px; }
+.live-badge { color:#00FF88; font-size:11px; animation:blink 1.5s infinite; }
+@keyframes blink { 0%,100%{opacity:1}50%{opacity:0.2} }
+.target-info { text-align:right; font-size:10px; color:#00C8FF; line-height:1.6; }
+
+/* PANELS */
+.panel {
+  position:fixed; z-index:10;
+  background:rgba(0,8,20,0.88);
+  border:1px solid rgba(0,200,255,0.18);
+  border-radius:6px; padding:12px;
+  backdrop-filter:blur(4px);
+}
+.panel-title {
+  font-size:9px; color:#00C8FF; letter-spacing:2px;
+  border-bottom:1px solid rgba(0,200,255,0.15);
+  padding-bottom:6px; margin-bottom:8px;
+}
+.stat-row { display:flex; justify-content:space-between; margin:5px 0; font-size:10px; }
+.stat-label { color:#556; }
+.stat-val { color:#00FF88; font-weight:bold; }
+.stat-val.alert { color:#FF6A00; }
+
+/* LEFT PANEL */
+#left-panel { top:65px; left:12px; width:185px; }
+
+/* RIGHT PANEL */
+#right-panel { top:65px; right:12px; width:195px; }
+
+/* RADAR */
+#radar-panel { top:65px; left:50%; transform:translateX(-50%); width:160px; }
+#radar-canvas { display:block; margin:0 auto; }
+
+/* LIGHT CURVE */
+#lc-panel { bottom:12px; left:12px; width:400px; height:195px; }
+#lc-canvas { width:100%; margin-top:4px; }
+
+/* SPECTROGRAPH */
+#spec-panel { bottom:12px; left:425px; width:220px; height:195px; }
+#spec-canvas { display:block; margin-top:4px; }
+
+/* MODEL PANEL */
+#model-panel { bottom:12px; right:12px; width:310px; }
+.model-row { display:flex; align-items:center; gap:6px; margin:6px 0; }
+.model-name { font-size:9px; width:110px; }
+.bar-bg { flex:1; height:7px; background:#0a0a1a; border-radius:3px; overflow:hidden; }
+.bar-fill { height:100%; border-radius:3px; transition:width 0.4s ease; }
+.score-val { font-size:9px; width:30px; text-align:right; }
+.badge {
+  font-size:8px; padding:1px 5px; border-radius:2px;
+  font-weight:bold; letter-spacing:1px; min-width:55px; text-align:center;
+}
+.badge.detected { background:rgba(0,255,100,0.15); color:#00FF88; border:1px solid #00FF88; }
+.badge.missed   { background:rgba(255,60,60,0.15);  color:#FF4444; border:1px solid #FF4444; }
+.badge.idle     { background:rgba(80,80,80,0.15);   color:#666;    border:1px solid #444; }
+.conf-val { font-size:8px; color:#888; width:38px; text-align:right; }
+
+/* TRANSIT LOG */
+#log-panel { bottom:220px; right:12px; width:310px; height:130px; overflow:hidden; }
+#log-body { font-size:9px; color:#556; line-height:1.7; overflow:hidden; }
+.log-entry { color:#00C8FF; }
+.log-entry.warn { color:#FFA500; }
+
+/* TRANSIT ALERT */
+#transit-alert {
+  position:fixed; top:62px; left:50%; transform:translateX(-50%);
+  background:rgba(255,100,0,0.12); border:1px solid rgba(255,140,0,0.7);
+  color:#FFA500; padding:7px 22px; border-radius:4px;
+  font-size:11px; letter-spacing:2px; z-index:20;
+  opacity:0; transition:opacity 0.3s; white-space:nowrap;
+}
+
+/* MISSION TIMER */
+#timer { position:fixed; top:65px; left:50%; transform:translateX(-50%); 
+  margin-top:50px; font-size:10px; color:#334; letter-spacing:2px; z-index:10; }
+
+/* CONTROLS */
+#controls { position:fixed; bottom:220px; left:12px; z-index:10; display:flex; gap:8px; }
+.btn {
+  background:rgba(0,200,255,0.1); border:1px solid rgba(0,200,255,0.35);
+  color:#00C8FF; padding:5px 12px; border-radius:3px;
+  font-family:'Courier New'; font-size:10px; cursor:pointer; letter-spacing:1px;
+  pointer-events:all;
+}
+.btn:hover { background:rgba(0,200,255,0.25); }
+
+/* FLARE */
+.flare {
+  position:fixed; border-radius:50%; pointer-events:none;
+  background:radial-gradient(circle,rgba(255,140,0,0.6) 0%,transparent 70%);
+  animation:flare-anim 2s ease-out forwards;
+}
+@keyframes flare-anim { 0%{opacity:0.8;transform:scale(0.5)}100%{opacity:0;transform:scale(3)} }
+</style>
+</head>
+<body>
+<canvas id="three-canvas"></canvas>
+
+<!-- TOPBAR -->
+<div id="topbar">
+  <div>
+    <div class="logo">⬡ QUANTUMKEPLER</div>
+    <div class="subtitle">QUANTUM-CLASSICAL HYBRID EXOPLANET DETECTION SYSTEM v2.0</div>
+  </div>
+  <div class="live-badge">● LIVE SIMULATION — TRAPPIST-1 SYSTEM</div>
+  <div class="target-info">
+    RA 23h 06m 29s | DEC −05° 02′<br>
+    103,700 DATA POINTS | K2 MISSION
+  </div>
+</div>
+
+<!-- STELLAR DATA -->
+<div class="panel" id="left-panel">
+  <div class="panel-title">★ STELLAR DATA</div>
+  <div class="stat-row"><span class="stat-label">Star</span><span class="stat-val">TRAPPIST-1</span></div>
+  <div class="stat-row"><span class="stat-label">Type</span><span class="stat-val">M8V (Red Dwarf)</span></div>
+  <div class="stat-row"><span class="stat-label">Temp</span><span class="stat-val">2566 K</span></div>
+  <div class="stat-row"><span class="stat-label">Radius</span><span class="stat-val">0.121 R☉</span></div>
+  <div class="stat-row"><span class="stat-label">Distance</span><span class="stat-val">40.7 ly</span></div>
+  <div class="stat-row"><span class="stat-label">Live Flux</span><span class="stat-val" id="flux-val">1.0000</span></div>
+  <div class="stat-row"><span class="stat-label">Flux Δ</span><span class="stat-val" id="flux-delta">+0.0000</span></div>
+  <div class="stat-row"><span class="stat-label">Transit</span><span class="stat-val" id="transit-status">NONE</span></div>
+  <div class="stat-row"><span class="stat-label">Transiting</span><span class="stat-val" id="transiting-planet">—</span></div>
+</div>
+
+<!-- PLANET DATA -->
+<div class="panel" id="right-panel">
+  <div class="panel-title">🪐 PLANET DATA</div>
+  <div id="planet-stats"></div>
+</div>
+
+<!-- RADAR -->
+<div class="panel" id="radar-panel">
+  <div class="panel-title" style="text-align:center">◎ ORBIT RADAR</div>
+  <canvas id="radar-canvas" width="130" height="130"></canvas>
+</div>
+
+<!-- TRANSIT ALERT -->
+<div id="transit-alert">⚠ TRANSIT EVENT DETECTED</div>
+<div id="timer">MISSION ELAPSED: 00:00:00</div>
+
+<!-- LIGHT CURVE -->
+<div class="panel" id="lc-panel">
+  <div class="panel-title">📈 LIVE LIGHT CURVE — NORMALIZED FLUX</div>
+  <canvas id="lc-canvas" width="370" height="145"></canvas>
+</div>
+
+<!-- SPECTROGRAPH -->
+<div class="panel" id="spec-panel">
+  <div class="panel-title">🌈 SPECTROGRAPH</div>
+  <canvas id="spec-canvas" width="192" height="145"></canvas>
+</div>
+
+<!-- TRANSIT LOG -->
+<div class="panel" id="log-panel">
+  <div class="panel-title">📋 TRANSIT EVENT LOG</div>
+  <div id="log-body">
+    <div>[ SYS ] Initializing TRAPPIST-1 simulation...</div>
+    <div>[ SYS ] Loading 103,700 K2 data points...</div>
+    <div>[ SYS ] Quantum circuits armed. Awaiting transit.</div>
+  </div>
+</div>
+
+<!-- MODEL COMPARISON -->
+<div class="panel" id="model-panel">
+  <div class="panel-title">🤖 MODEL COMPARISON — LIVE DETECTION</div>
+  <div id="model-rows"></div>
+  <div style="margin-top:8px;font-size:8px;color:#334;border-top:1px solid #111;padding-top:6px;">
+    F1 SCORE ■ | CONFIDENCE % | DETECTION STATUS
+  </div>
+</div>
+
+<!-- CONTROLS -->
+<div id="controls">
+  <button class="btn" onclick="togglePlay()" id="play-btn">⏸ PAUSE</button>
+  <button class="btn" onclick="resetSim()">↺ RESET</button>
+  <button class="btn" onclick="toggleSpeed()" id="speed-btn">⚡ 1×</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ══════════════════════════════════════════════
+//  THREE.JS SCENE
+// ══════════════════════════════════════════════
+const canvas = document.getElementById('three-canvas');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(window.devicePixelRatio);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(55, window.innerWidth/window.innerHeight, 0.1, 2000);
+camera.position.set(0, 5, 13);
+camera.lookAt(0,0,0);
+
+// Starfield       
+const sgeo = new THREE.BufferGeometry();
+const sv = [];
+for(let i=0;i<12000;i++) sv.push((Math.random()-.5)*600,(Math.random()-.5)*600,(Math.random()-.5)*600);
+sgeo.setAttribute('position', new THREE.Float32BufferAttribute(sv,3));
+scene.add(new THREE.Points(sgeo, new THREE.PointsMaterial({color:0xffffff,size:0.12})));
+
+// TRAPPIST-1 — red dwarf (smaller, redder)
+const starMesh = new THREE.Mesh(
+  new THREE.SphereGeometry(1.0, 64, 64),
+  new THREE.MeshBasicMaterial({color:0xFF3300})
+);
+scene.add(starMesh);
+
+// Glow layers
+[0.15,0.35,0.6,1.0].forEach((s,i)=>{
+  const g = new THREE.Mesh(
+    new THREE.SphereGeometry(1.0+s, 32, 32),
+    new THREE.MeshBasicMaterial({color:0xFF2200, transparent:true, opacity:0.06-i*0.01})
+  );
+  scene.add(g);
+});
+
+const starLight = new THREE.PointLight(0xFF4400, 2.5, 40);
+scene.add(starLight);
+scene.add(new THREE.AmbientLight(0x110000));
+
+// TRAPPIST-1 planets b,c,d,e,f,g,h
+const PLANET_DATA = [
+  {name:'TRAPPIST-1b', radius:0.13, orbitR:2.0,  speed:0.028, color:0xFF6B35, atm:0xFFAA66},
+  {name:'TRAPPIST-1c', radius:0.13, orbitR:2.8,  speed:0.021, color:0xE8D5B7, atm:0xFFE8CC},
+  {name:'TRAPPIST-1d', radius:0.10, orbitR:3.6,  speed:0.016, color:0x4FC3F7, atm:0x88DDFF},
+  {name:'TRAPPIST-1e', radius:0.11, orbitR:4.5,  speed:0.012, color:0x66BB6A, atm:0x88FF88},
+  {name:'TRAPPIST-1f', radius:0.12, orbitR:5.5,  speed:0.009, color:0x5C6BC0, atm:0x8888FF},
+  {name:'TRAPPIST-1g', radius:0.12, orbitR:6.6,  speed:0.007, color:0xAB47BC, atm:0xCC88FF},
+  {name:'TRAPPIST-1h', radius:0.09, orbitR:7.8,  speed:0.005, color:0x78909C, atm:0xAABBCC},
+];
+
+const planets = PLANET_DATA.map((pd, idx) => {
+  // Planet body
+  const mesh = new THREE.Mesh(
+    new THREE.SphereGeometry(pd.radius, 32, 32),
+    new THREE.MeshPhongMaterial({color:pd.color, shininess:60, specular:0x222222})
+  );
+
+  // Atmosphere glow
+  const atm = new THREE.Mesh(
+    new THREE.SphereGeometry(pd.radius*1.35, 20, 20),
+    new THREE.MeshBasicMaterial({color:pd.atm, transparent:true, opacity:0.12})
+  );
+  mesh.add(atm);
+
+  // Orbit ring
+  const opts = [];
+  for(let i=0;i<=128;i++){
+    const a=(i/128)*Math.PI*2;
+    opts.push(Math.cos(a)*pd.orbitR, 0, Math.sin(a)*pd.orbitR);
+  }
+  const og = new THREE.BufferGeometry();
+  og.setAttribute('position', new THREE.Float32BufferAttribute(opts,3));
+  scene.add(new THREE.Line(og, new THREE.LineBasicMaterial({color:0x1a2233, opacity:0.6, transparent:true})));
+
+  // Particle trail
+  const trailGeo = new THREE.BufferGeometry();
+  const trailPts = new Float32Array(30*3);
+  trailGeo.setAttribute('position', new THREE.Float32BufferAttribute(trailPts,3));
+  const trail = new THREE.Points(trailGeo, new THREE.PointsMaterial({color:pd.color, size:0.06, transparent:true, opacity:0.5}));
+  scene.add(trail);
+  scene.add(mesh);
+
+  return {
+    mesh, trail, trailPts, trailIdx:0,
+    angle: (idx/7)*Math.PI*2,
+    ...pd
+  };
+});
+
+// ══════════════════════════════════════════════
+//  PLANET STATS HTML
+// ══════════════════════════════════════════════
+const planetStatsEl = document.getElementById('planet-stats');
+planets.slice(0,4).forEach(p=>{
+  planetStatsEl.innerHTML += `
+    <div class="stat-row">
+      <span class="stat-label" style="color:${'#'+p.color.toString(16).padStart(6,'0')}">${p.name.replace('TRAPPIST-1','T1-')}</span>
+      <span class="stat-val" id="pstat-${p.name}">0.00°</span>
+    </div>`;
+});
+
+// ══════════════════════════════════════════════
+//  MODEL DATA
+// ══════════════════════════════════════════════
+const MODELS = [
+  {name:'Random Forest',     color:'#F97316', f1:0.25, recall:0.20, precision:0.33},
+  {name:'CNN',               color:'#3B82F6', f1:0.67, recall:0.60, precision:0.75},
+  {name:'Quantum KernelSVM', color:'#A855F7', f1:0.67, recall:0.80, precision:0.57},
+  {name:'VQC',               color:'#22C55E', f1:0.77, recall:1.00, precision:0.63},
+];
+
+const modelRowsEl = document.getElementById('model-rows');
+MODELS.forEach(m=>{
+  const id = m.name.replace(/\s/g,'-');
+  modelRowsEl.innerHTML += `
+    <div class="model-row">
+      <div class="model-name" style="color:${m.color}">${m.name}</div>
+      <div class="bar-bg"><div class="bar-fill" id="bar-${id}" style="width:${m.f1*100}%;background:${m.color}"></div></div>
+      <div class="score-val" style="color:${m.color}" id="score-${id}">${m.f1.toFixed(2)}</div>
+      <div class="conf-val" id="conf-${id}">—</div>
+      <div class="badge idle" id="badge-${id}">IDLE</div>
+    </div>`;
+});
+
+// ══════════════════════════════════════════════
+//  CANVASES
+// ══════════════════════════════════════════════
+const lcCanvas = document.getElementById('lc-canvas');
+const lcCtx = lcCanvas.getContext('2d');
+const specCanvas = document.getElementById('spec-canvas');
+const specCtx = specCanvas.getContext('2d');
+const radarCanvas = document.getElementById('radar-canvas');
+const radarCtx = radarCanvas.getContext('2d');
+
+// ══════════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════════
+let playing = true, speedMult = 1;
+let fluxHistory = [];
+const MAX_HIST = 350;
+let transitLog = [];
+let missionSeconds = 0;
+let lastFlux = 1.0;
+let frameCount = 0;
+let currentTransitPlanet = null;
+let lastTransitState = false;
+let solarFlareTimer = 0;
+
+// ══════════════════════════════════════════════
+//  FLUX COMPUTATION
+// ══════════════════════════════════════════════
+function computeFlux() {
+  let flux = 1.0;
+  let transitPlanet = null;
+  planets.forEach(p=>{
+    const px = p.mesh.position.x;
+    const py = p.mesh.position.y;
+    const pz = p.mesh.position.z;
+    const d2 = Math.sqrt(px*px + py*py);
+    if(pz > 0 && d2 < (1.0 + p.radius*2)) {
+      const overlap = Math.max(0,(1.0+p.radius*2-d2));
+      const dip = Math.pow(p.radius/1.0,2)*Math.min(1,overlap/(2*p.radius))*0.6;
+      flux -= dip;
+      if(dip > 0.001) transitPlanet = p.name;
+    }
+  });
+  currentTransitPlanet = transitPlanet;
+  return Math.max(0.96, Math.min(1.002, flux + (Math.random()-0.5)*0.0003));
+}
+
+// ══════════════════════════════════════════════
+//  DRAW LIGHT CURVE
+// ══════════════════════════════════════════════
+function drawLC() {
+  const w=lcCanvas.width, h=lcCanvas.height;
+  lcCtx.fillStyle='#030310'; lcCtx.fillRect(0,0,w,h);
+
+  // Grid
+  lcCtx.strokeStyle='#0d0d20'; lcCtx.lineWidth=1;
+  for(let i=0;i<=5;i++){
+    const y=(i/5)*h;
+    lcCtx.beginPath(); lcCtx.moveTo(0,y); lcCtx.lineTo(w,y); lcCtx.stroke();
+  }
+  for(let i=0;i<=6;i++){
+    const x=(i/6)*w;
+    lcCtx.beginPath(); lcCtx.moveTo(x,0); lcCtx.lineTo(x,h); lcCtx.stroke();
+  }
+
+  if(fluxHistory.length<2) return;
+
+  // Shade transit regions
+  lcCtx.fillStyle='rgba(255,100,0,0.06)';
+  let inT=false, startX=0;
+  fluxHistory.forEach((f,i)=>{
+    const x=(i/MAX_HIST)*w;
+    if(f<0.999 && !inT){inT=true;startX=x;}
+    if(f>=0.999 && inT){inT=false;lcCtx.fillRect(startX,0,x-startX,h);}
+  });
+
+  // Glow path
+  lcCtx.save();
+  lcCtx.shadowColor='#A855F7'; lcCtx.shadowBlur=12;
+  lcCtx.beginPath(); lcCtx.strokeStyle='#A855F7'; lcCtx.lineWidth=2;
+  fluxHistory.forEach((f,i)=>{
+    const x=(i/MAX_HIST)*w;
+    const y=h-((f-0.955)/0.055)*h;
+    i===0?lcCtx.moveTo(x,y):lcCtx.lineTo(x,y);
+  });
+  lcCtx.stroke(); lcCtx.restore();
+
+  // Current dot
+  const lx=((fluxHistory.length-1)/MAX_HIST)*w;
+  const lf=fluxHistory[fluxHistory.length-1];
+  const ly=h-((lf-0.955)/0.055)*h;
+  lcCtx.beginPath(); lcCtx.arc(lx,ly,4,0,Math.PI*2);
+  lcCtx.fillStyle='#fff'; lcCtx.fill();
+
+  // Labels
+  lcCtx.fillStyle='#445'; lcCtx.font='9px Courier New';
+  lcCtx.fillText('1.002',3,11); lcCtx.fillText('0.960',3,h-3);
+}
+
+// ══════════════════════════════════════════════
+//  DRAW SPECTROGRAPH
+// ══════════════════════════════════════════════
+function drawSpec(flux) {
+  const w=specCanvas.width, h=specCanvas.height;
+  specCtx.fillStyle='#030310'; specCtx.fillRect(0,0,w,h);
+
+  const wavelengths=['380','450','520','590','660','730','780'];
+  const baseColors=['#8800FF','#0044FF','#00AA44','#AAAA00','#FF4400','#FF0000','#880000'];
+  const barW = w/wavelengths.length;
+
+  const transitDip = 1-flux;
+
+  wavelengths.forEach((wl,i)=>{
+    const intensity = (0.7+Math.random()*0.3) - transitDip*(0.3+Math.random()*0.4);
+    const barH = Math.max(5, intensity*h*0.85);
+    const x=i*barW+2;
+    specCtx.fillStyle=baseColors[i];
+    specCtx.globalAlpha=0.7+Math.random()*0.2;
+    specCtx.fillRect(x, h-barH, barW-4, barH);
+    specCtx.globalAlpha=1;
+    specCtx.fillStyle='#334';
+    specCtx.font='7px Courier New';
+    specCtx.fillText(wl+'nm', x, h-2);
+  });
+
+  // Absorption lines during transit
+  if(flux < 0.999) {
+    specCtx.strokeStyle='rgba(0,255,200,0.6)'; specCtx.lineWidth=1;
+    [45,90,130].forEach(x=>{
+      specCtx.beginPath(); specCtx.moveTo(x,0); specCtx.lineTo(x,h-14); specCtx.stroke();
+    });
+  }
+}
+
+// ══════════════════════════════════════════════
+//  DRAW RADAR
+// ══════════════════════════════════════════════
+function drawRadar() {
+  const w=radarCanvas.width, h=radarCanvas.height;
+  const cx=w/2, cy=h/2, r=55;
+  radarCtx.fillStyle='#030310'; radarCtx.fillRect(0,0,w,h);
+
+  // Rings
+  [1,0.67,0.33].forEach(s=>{
+    radarCtx.beginPath(); radarCtx.arc(cx,cy,r*s,0,Math.PI*2);
+    radarCtx.strokeStyle='#0d1a2e'; radarCtx.lineWidth=1; radarCtx.stroke();
+  });
+  // Cross
+  radarCtx.strokeStyle='#0d1a2e';
+  radarCtx.beginPath(); radarCtx.moveTo(cx-r,cy); radarCtx.lineTo(cx+r,cy); radarCtx.stroke();
+  radarCtx.beginPath(); radarCtx.moveTo(cx,cy-r); radarCtx.lineTo(cx,cy+r); radarCtx.stroke();
+
+  // Star
+  radarCtx.beginPath(); radarCtx.arc(cx,cy,4,0,Math.PI*2);
+  radarCtx.fillStyle='#FF3300'; radarCtx.fill();
+
+  // Planets
+  planets.forEach(p=>{
+    const norm = p.orbitR/9;
+    const px2 = cx + Math.cos(p.angle)*norm*r;
+    const py2 = cy + Math.sin(p.angle)*norm*r;
+    radarCtx.beginPath(); radarCtx.arc(px2,py2,3,0,Math.PI*2);
+    radarCtx.fillStyle='#'+p.color.toString(16).padStart(6,'0');
+    radarCtx.fill();
+  });
+}
+
+// ══════════════════════════════════════════════
+//  MODEL UPDATE
+// ══════════════════════════════════════════════
+function updateModels(flux, inTransit) {
+  MODELS.forEach(m=>{
+    const id=m.name.replace(/\s/g,'-');
+    const badge=document.getElementById(`badge-${id}`);
+    const bar=document.getElementById(`bar-${id}`);
+    const conf=document.getElementById(`conf-${id}`);
+
+    if(inTransit){
+      const detected=Math.random()<m.recall;
+      const confidence=(detected?(0.6+Math.random()*0.38):(Math.random()*0.4)).toFixed(2);
+      conf.textContent=confidence+'%'.replace('%','');
+      if(detected){
+        badge.textContent='DETECTED'; badge.className='badge detected';
+        bar.style.width=(m.f1*100)+'%';
+      } else {
+        badge.textContent='MISSED'; badge.className='badge missed';
+        bar.style.width='8%';
+      }
+    } else {
+      badge.textContent='IDLE'; badge.className='badge idle';
+      bar.style.width=(m.f1*100)+'%';
+      conf.textContent='—';
+    }
+  });
+}
+
+// ══════════════════════════════════════════════
+//  TRANSIT LOG
+// ══════════════════════════════════════════════
+function addLog(msg, type='') {
+  const el=document.getElementById('log-body');
+  const d=document.createElement('div');
+  d.className='log-entry'+(type?' '+type:'');
+  const t=new Date(missionSeconds*1000).toISOString().substr(11,8);
+  d.textContent=`[${t}] ${msg}`;
+  el.insertBefore(d,el.firstChild);
+  if(el.children.length>8) el.removeChild(el.lastChild);
+}
+
+// ══════════════════════════════════════════════
+//  SOLAR FLARE
+// ══════════════════════════════════════════════
+function spawnFlare() {
+  const fl=document.createElement('div');
+  fl.className='flare';
+  const size=80+Math.random()*120;
+  fl.style.cssText=`width:${size}px;height:${size}px;left:calc(50% - ${size/2}px);top:calc(50% - ${size/2}px - 40px);`;
+  document.body.appendChild(fl);
+  setTimeout(()=>fl.remove(),2000);
+}
+
+// ══════════════════════════════════════════════
+//  MISSION TIMER
+// ══════════════════════════════════════════════
+setInterval(()=>{
+  if(playing){ missionSeconds+=speedMult; }
+  const h=Math.floor(missionSeconds/3600).toString().padStart(2,'0');
+  const m=Math.floor((missionSeconds%3600)/60).toString().padStart(2,'0');
+  const s=(missionSeconds%60).toString().padStart(2,'0');
+  document.getElementById('timer').textContent=`MISSION ELAPSED: ${h}:${m}:${s}`;
+},1000);
+
+// ══════════════════════════════════════════════
+//  MAIN ANIMATE LOOP
+// ══════════════════════════════════════════════
+function animate() {
+  requestAnimationFrame(animate);
+  if(!playing){ renderer.render(scene,camera); return; }
+
+  frameCount++;
+
+  // Rotate star
+  starMesh.rotation.y+=0.003;
+
+  // Solar flare
+  solarFlareTimer++;
+  if(solarFlareTimer>200+Math.random()*300){ solarFlareTimer=0; spawnFlare(); }
+
+  // Move planets + update trails
+  planets.forEach(p=>{
+    p.angle+=p.speed*speedMult;
+    p.mesh.position.set(
+      Math.cos(p.angle)*p.orbitR,
+      Math.sin(p.angle*0.2)*0.25,
+      Math.sin(p.angle)*p.orbitR
+    );
+    p.mesh.rotation.y+=0.015;
+
+    // Trail
+    const tp=p.trailPts;
+    tp.copyWithin(3,0);
+    tp[0]=p.mesh.position.x; tp[1]=p.mesh.position.y; tp[2]=p.mesh.position.z;
+    p.trail.geometry.attributes.position.array.set(tp);
+    p.trail.geometry.attributes.position.needsUpdate=true;
+
+    // Planet stats
+    const el=document.getElementById(`pstat-${p.name}`);
+    if(el) el.textContent=((p.angle%(Math.PI*2))*180/Math.PI).toFixed(1)+'°';
+  });
+
+  // Flux
+  const flux=computeFlux();
+  const delta=(flux-lastFlux).toFixed(4);
+  lastFlux=flux;
+  fluxHistory.push(flux);
+  if(fluxHistory.length>MAX_HIST) fluxHistory.shift();
+
+  const inTransit=flux<0.999;
+
+  // HUD updates
+  document.getElementById('flux-val').textContent=flux.toFixed(4);
+  document.getElementById('flux-val').className='stat-val'+(inTransit?' alert':'');
+  document.getElementById('flux-delta').textContent=(delta>=0?'+':'')+delta;
+  document.getElementById('transit-status').textContent=inTransit?'⚡ ACTIVE':'NONE';
+  document.getElementById('transit-status').className='stat-val'+(inTransit?' alert':'');
+  document.getElementById('transiting-planet').textContent=currentTransitPlanet||'—';
+
+  // Transit alert
+  document.getElementById('transit-alert').style.opacity=inTransit?'1':'0';
+
+  // Star color
+  starMesh.material.color.setHex(inTransit?0xFF1100:0xFF3300);
+
+  // Log new transit
+  if(inTransit && !lastTransitState){
+    addLog(`Transit: ${currentTransitPlanet||'unknown'}`,'warn');
+    addLog('Quantum circuits evaluating...','');
+  }
+  if(!inTransit && lastTransitState){
+    addLog('Transit complete. Results logged.','');
+  }
+  lastTransitState=inTransit;
+
+  // Model update every 25 frames
+  if(frameCount%25===0) updateModels(flux,inTransit);
+
+  // Draw 2D canvases
+  drawLC();
+  drawSpec(flux);
+  drawRadar();
+
+  renderer.render(scene,camera);
+}
+
+// ══════════════════════════════════════════════
+//  CONTROLS
+// ══════════════════════════════════════════════
+function togglePlay(){
+  playing=!playing;
+  document.getElementById('play-btn').textContent=playing?'⏸ PAUSE':'▶ PLAY';
+}
+function resetSim(){
+  fluxHistory=[];
+  planets.forEach(p=>{ p.angle=Math.random()*Math.PI*2; });
+  missionSeconds=0;
+}
+function toggleSpeed(){
+  speedMult=speedMult===1?3:speedMult===3?6:1;
+  document.getElementById('speed-btn').textContent=`⚡ ${speedMult}×`;
+}
+
+window.addEventListener('resize',()=>{
+  camera.aspect=window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth,window.innerHeight);
+});
+
+addLog('System online. TRAPPIST-1 locked.','');
+animate();
+</script>
+</body>
+</html>
