@@ -1,0 +1,12 @@
+streamlit
+pandas
+numpy
+plotly
+scikit-learn
+pennylane
+lightkurve
+torch
+mlflow
+pyyaml
+tqdm
+python-dotenv
